@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from bs4 import BeautifulSoup
 import requests
@@ -25,8 +25,15 @@ def fetch_faq(url):
 
 @app.get("/faq")
 def get_faq():
-    try:
-        faq_data = fetch_faq(URL)
-        return JSONResponse(content={"faqs": faq_data})
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+    return JSONResponse(content={"method": "GET", "faqs": fetch_faq(URL)})
+
+@app.post("/faq")
+async def post_faq(request: Request):
+    body = await request.json()
+    print("Webhook triggered with payload:", body)
+    faqs = fetch_faq(URL)
+    return JSONResponse(content={
+        "method": "POST",
+        "received_payload": body,
+        "faqs": faqs
+    })
