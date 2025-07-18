@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 from bs4 import BeautifulSoup
 import requests
 
@@ -23,33 +23,17 @@ def fetch_faq(url):
 
     return faq
 
-# HEAD request to validate webhook (used by Zoho)
-@app.head("/faq")
-async def handle_head():
-    return Response(status_code=200)
+@app.get("/faq")
+def get_faq():
+    return JSONResponse(content={"method": "GET", "faqs": fetch_faq(URL)})
 
-# POST request to trigger scraping
 @app.post("/faq")
-async def webhook(request: Request):
-    try:
-        data = await request.json()
-        faqs = fetch_faq(URL)
-        total_qs = sum(len(qs) for qs in faqs.values())
-
-        return JSONResponse(content={
-            "action": {
-                "type": "reply",
-                "value": f"✅ Fetched {total_qs} FAQs successfully."
-            },
-            "faq_count": total_qs,
-            "categories": list(faqs.keys())
-        })
-
-    except Exception as e:
-        return JSONResponse(status_code=500, content={
-            "action": {
-                "type": "reply",
-                "value": "❌ Failed to fetch FAQs. Please try again later."
-            },
-            "error": str(e)
-        })
+async def post_faq(request: Request):
+    body = await request.json()
+    print("Webhook triggered with payload:", body)
+    faqs = fetch_faq(URL)
+    return JSONResponse(content={
+        "method": "POST",
+        "received_payload": body,
+        "faqs": faqs
+    })
