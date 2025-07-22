@@ -1,39 +1,86 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from bs4 import BeautifulSoup
+import time
 import requests
+from bs4 import BeautifulSoup
+from fastapi import FastAPI, Query
+from pydantic import BaseModel
+from typing import List, Optional
 
 app = FastAPI()
 
-URL = "https://playaebikes.com/faq/"
+HEADERS = {"User-Agent": "Mozilla/5.0"}
+BASE_URL = "https://playaebikes.com/faq/"
+faq_data = []
 
-def fetch_faq(url):
-    resp = requests.get(url)
-    resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
+class FAQItem(BaseModel):
+    question: str
+    answer: str
+    url: str
 
-    faq = {}
-    for section in soup.select("h2"):
-        category = section.get_text(strip=True)
-        ul = section.find_next_sibling("ul")
-        if not ul:
-            continue
-        questions = [li.get_text(strip=True).lstrip("• ").lstrip("* ") for li in ul.find_all("li")]
-        faq[category] = questions
+def scrape_faqs():
+    global faq_data
+    response = requests.get(BASE_URL, headers=HEADERS)
+    soup = BeautifulSoup(response.text, 'html.parser')
 
-    return faq
+    faq_data = []
+    faq_items = soup.select("h3.elementor-post__title")
 
-@app.get("/faq")
-def get_faq():
-    return JSONResponse(content={"method": "GET", "faqs": fetch_faq(URL)})
+    for item in faq_items:
+        question = item.get_text(strip=True)
+        link = item.find('a')['href']
+        if not link.startswith("http"):
+            link = BASE_URL + link.lstrip("/")
 
-@app.post("/faq")
-async def post_faq(request: Request):
-    body = await request.json()
-    print("Webhook triggered with payload:", body)
-    faqs = fetch_faq(URL)
-    return JSONResponse(content={
-        "method": "POST",
-        "received_payload": body,
-        "faqs": faqs
-    })
+        try:
+            faq_response = requests.get(link, headers=HEADERS)
+            faq_soup = BeautifulSoup(faq_response.text, 'html.parser')
+            main = faq_soup.find('main')
+            answer_parts = []
+
+            if main:
+                divs = main.find_all('div', recursive=True)
+                for div in divs:
+                    text = div.get_text(separator="\n", strip=True)
+                    if len(text) > 40:
+                        answer_parts.append(text)
+
+            answer_text = "\n\n".join(answer_parts).strip()
+            if not answer_text:
+                answer_text = "Answer not found."
+        except Exception as e:
+            answer_text = f"Error fetching: {str(e)}"
+
+        faq_data.append({
+            "question": question,
+            "answer": answer_text,
+            "url": link
+        })
+
+        time.sleep(0.5)  # rate limiting
+
+@app.get("/", tags=["Root"])
+def root():
+    return {"message": "Welcome to the Playa eBikes® FAQ API"}
+
+@app.get("/faqs", response_model=List[FAQItem], tags=["FAQs"])
+def get_all_faqs():
+    return faq_data
+
+@app.get("/faq", response_model=Optional[FAQItem], tags=["FAQs"])
+def get_faq_by_question(question: str = Query(..., description="Exact FAQ question")):
+    q = question.strip().lower()
+    for item in faq_data:
+        if item["question"].strip().lower() == q:
+            return item
+    return {"error": "Question not found"}
+
+@app.post("/refresh", tags=["Admin"])
+def refresh_data():
+    scrape_faqs()
+    return {"status": "FAQ data refreshed", "count": len(faq_data)}
+
+# Auto-scrape on app start
+scrape_faqs()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", port=8000, reload=True)
