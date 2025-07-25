@@ -63,6 +63,7 @@ def root():
 
 @app.get("/faqs", response_model=List[FAQItem], tags=["FAQs"])
 def get_all_faqs():
+    scrape_faqs()
     return faq_data
 
 @app.get("/faq", response_model=Optional[FAQItem], tags=["FAQs"])
